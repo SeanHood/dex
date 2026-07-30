@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/google/uuid"
 
 	"github.com/dexidp/dex/connector"
 )
@@ -241,6 +242,37 @@ func parseScope(s string) (int, bool) {
 		return ldap.ScopeSingleLevel, true
 	}
 	return 0, false
+}
+
+// formatGuidAttr converts the objectGUID byte array returned from
+// Active Directory into a readable uuid format
+func formatGuidAttr(attr string) string {
+	if uuid_string, err := uuid.FromBytes([]byte(attr)); err == nil {
+		return uuid_string.String()
+	}
+	return attr
+}
+
+// formatSidAttr converts the objectSid byte array returned from
+// Active Directory into a readable string format like S-1-5-21...
+func formatSidAttr(attr string) string {
+	b := []byte(attr)
+	revision := int(b[0])
+	number_of_sub_ids := int(b[1])
+	var iav int
+	for i, x := range b[2:8] {
+		iav = iav | int(x)<<(8*(5-i))
+	}
+	s := fmt.Sprintf("S-%d-%d", revision, iav)
+
+	for i := range number_of_sub_ids {
+		var sub int
+		for i, x := range b[8+4*i : 12+4*i] {
+			sub = sub | int(x)<<(8*i)
+		}
+		s += fmt.Sprintf("-%d", sub)
+	}
+	return s
 }
 
 // Build a list of group attr name to user attr value matchers.
@@ -493,6 +525,14 @@ func (c *ldapConnector) getAttrs(e ldap.Entry, name string) []string {
 
 func (c *ldapConnector) getAttr(e ldap.Entry, name string) string {
 	if a := c.getAttrs(e, name); len(a) > 0 {
+
+		if name == "objectSid" {
+			return formatSidAttr(a[0])
+		}
+
+		if name == "objectGUID" {
+			return formatGuidAttr(a[0])
+		}
 		return a[0]
 	}
 	return ""
